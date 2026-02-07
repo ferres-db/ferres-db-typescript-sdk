@@ -1,5 +1,5 @@
 {
-  "name": "@ferres-db/typescript-sdk",
+  "name": "@ferresdb/typescript-sdk",
   "version": "0.1.0",
   "description": "TypeScript SDK for FerresDB vector database",
   "type": "module",
@@ -13,9 +13,7 @@
       "require": "./dist/index.cjs"
     }
   },
-  "files": [
-    "dist"
-  ],
+  "files": ["dist"],
   "scripts": {
     "build": "tsup",
     "test": "vitest",
@@ -24,28 +22,22 @@
     "lint": "eslint src --ext .ts",
     "typecheck": "tsc --noEmit"
   },
-  "keywords": [
-    "vector-database",
-    "embeddings",
-    "similarity-search",
-    "hnsw",
-    "typescript"
-  ],
+  "keywords": ["vector-database", "embeddings", "similarity-search", "hnsw", "typescript"],
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "axios": "^1.7.7",
-    "zod": "^3.23.8"
+    "axios": "^1.7.9",
+    "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@types/node": "^20.14.12",
-    "@typescript-eslint/eslint-plugin": "^7.15.0",
-    "@typescript-eslint/parser": "^7.15.0",
-    "@vitest/coverage-v8": "^1.6.0",
+    "@types/node": "^22.10.0",
+    "@typescript-eslint/eslint-plugin": "^8.54.0",
+    "@typescript-eslint/parser": "^8.54.0",
+    "@vitest/coverage-v8": "^2.1.9",
     "eslint": "^8.57.0",
-    "tsup": "^8.1.0",
-    "typescript": "^5.5.4",
-    "vitest": "^1.6.0"
+    "tsup": "^8.3.0",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.9"
   },
   "engines": {
     "node": ">=18.0.0"

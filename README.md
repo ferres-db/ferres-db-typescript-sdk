@@ -12,16 +12,91 @@ npm install @ferres-db/typescript-sdk
 yarn add @ferres-db/typescript-sdk
 ```
 
+## 🐳 Executando FerresDB com Docker
+
+Para usar o SDK contra uma instância real do FerresDB, você pode subir o backend e o frontend com as imagens oficiais.
+
+### Baixar as imagens
+
+```bash
+docker pull ferresdb/ferres-db-core
+docker pull ferresdb/ferres-db-frontend
+```
+
+### Subir o backend (API)
+
+```bash
+docker run -d \
+  --name ferres-db-core \
+  -p 8080:8080 \
+  -e PORT=8080 \
+  -e STORAGE_PATH=/data \
+  -e FERRESDB_API_KEYS=ferres_sk_sua_chave_aqui \
+  -v ferres-data:/data \
+  ferresdb/ferres-db-core
+```
+
+- **API:** http://localhost:8080  
+- `FERRESDB_API_KEYS`: chave(s) de API aceitas pelo servidor (opcional; se omitir, use uma chave criada depois via dashboard ou API de keys, se disponível).  
+- O volume `ferres-data` persiste coleções e dados entre reinícios.
+
+### Subir o frontend (dashboard)
+
+Com o backend já em execução:
+
+```bash
+docker run -d \
+  --name ferres-db-frontend \
+  -p 3000:80 \
+  -e VITE_API_BASE_URL=http://localhost:8080 \
+  -e VITE_API_KEY=ferres_sk_sua_chave_aqui \
+  ferresdb/ferres-db-frontend
+```
+
+- **Dashboard:** http://localhost:3000  
+- `VITE_API_BASE_URL`: URL do backend (ajuste se o backend estiver em outro host/porta).  
+- `VITE_API_KEY`: mesma chave configurada no backend, para o dashboard autenticar.
+
+Se o navegador acessar o frontend em uma máquina diferente do host onde o backend roda, use a URL acessível do backend em `VITE_API_BASE_URL` (ex.: `http://ip-do-servidor:8080`).
+
+### Usar o SDK apontando para o backend
+
+Com o backend no ar em `http://localhost:8080` e a mesma API key:
+
+```typescript
+import { VectorDBClient } from '@ferres-db/typescript-sdk';
+
+const client = new VectorDBClient({
+  baseUrl: 'http://localhost:8080',
+  apiKey: 'ferres_sk_sua_chave_aqui',
+});
+// criar coleções, upsert, search, etc.
+```
+
 ## 🚀 Quick Start
+
+### Autenticação
+
+Todas as rotas de dados (coleções, pontos, busca, API keys) exigem autenticação. Passe a **API key** nas opções do cliente; o SDK envia automaticamente o header `Authorization: Bearer <apiKey>` em todas as requisições.
+
+```typescript
+const client = new VectorDBClient({
+  baseUrl: 'http://localhost:8080',
+  apiKey: 'ferres_sk_...', // obrigatório para rotas protegidas
+});
+```
+
+Sem `apiKey`, o servidor responderá 401 em rotas protegidas.
 
 ### Exemplo Básico
 
 ```typescript
 import { VectorDBClient, DistanceMetric } from '@ferres-db/typescript-sdk';
 
-// Cria uma instância do cliente
+// Cria uma instância do cliente (apiKey necessário para criar/listar coleções, etc.)
 const client = new VectorDBClient({
   baseUrl: 'http://localhost:8080',
+  apiKey: 'ferres_sk_...',
   timeout: 30000,
 });
 
@@ -79,6 +154,7 @@ async function generateEmbedding(text: string): Promise<number[]> {
 async function main() {
   const client = new VectorDBClient({
     baseUrl: 'http://localhost:8080',
+    apiKey: 'ferres_sk_...',
   });
 
   // Cria a coleção
@@ -132,6 +208,7 @@ import { VectorDBClient } from '@ferres-db/typescript-sdk';
 
 const client = new VectorDBClient({
   baseUrl: 'http://localhost:8080',
+  apiKey: 'ferres_sk_...',
 });
 
 // Busca com filtro de metadata
@@ -156,6 +233,7 @@ import {
 
 const client = new VectorDBClient({
   baseUrl: 'http://localhost:8080',
+  apiKey: 'ferres_sk_...',
   maxRetries: 5, // Número máximo de tentativas
   retryDelay: 1000, // Delay inicial em ms (exponential backoff)
 });
@@ -190,6 +268,7 @@ new VectorDBClient(options: VectorDBClientOptions)
 **Opções:**
 
 - `baseUrl` (string, obrigatório): URL base do servidor FerresDB (ex: `'http://localhost:8080'`)
+- `apiKey` (string, opcional): Chave de API para autenticação. **Recomendado** para todas as rotas de dados; o SDK envia `Authorization: Bearer <apiKey>`.
 - `timeout` (number, opcional): Timeout das requisições em ms (padrão: `30000`)
 - `maxRetries` (number, opcional): Número máximo de tentativas em caso de erro (padrão: `3`)
 - `retryDelay` (number, opcional): Delay inicial para retry em ms (padrão: `1000`)
@@ -204,6 +283,8 @@ Cria uma nova coleção.
 - `config.name` (string): Nome da coleção (apenas letras, números, hífens e underscores)
 - `config.dimension` (number): Dimensão dos vetores (1-4096)
 - `config.distance` (DistanceMetric): Métrica de distância
+- `config.enable_bm25` (boolean, opcional): Habilita índice BM25 para busca híbrida (padrão: false)
+- `config.bm25_text_field` (string, opcional): Chave em metadata usada como texto para BM25 (padrão: `"text"`)
 
 **Retorna:** Coleção criada
 
@@ -270,6 +351,26 @@ Busca pontos similares a um vetor de consulta.
 - `CollectionNotFoundError`: Se a coleção não existe
 - `InvalidDimensionError`: Se a dimensão do vetor não corresponde
 
+##### `listKeys(): Promise<ApiKeyInfo[]>`
+
+Lista as API keys (metadados, sem o valor bruto). Requer API key com perfil Editor/Admin.
+
+**Retorna:** Array de `ApiKeyInfo` (id, name, key_prefix, created_at)
+
+##### `createKey(name: string): Promise<CreateKeyResponse>`
+
+Cria uma nova API key. O valor bruto (`key`) é retornado **apenas uma vez**; armazene-o com segurança.
+
+**Parâmetros:** `name` (string): Nome de exibição da chave
+
+**Retorna:** `CreateKeyResponse` (id, name, key, key_prefix, created_at)
+
+**Erros:** `InvalidPayloadError` se o nome estiver vazio
+
+##### `deleteKey(id: number): Promise<void>`
+
+Remove uma API key pelo id (retornado por `listKeys` ou `createKey`).
+
 ### Tipos
 
 #### `DistanceMetric`
@@ -325,6 +426,29 @@ interface UpsertResult {
 }
 ```
 
+#### `ApiKeyInfo`
+
+```typescript
+interface ApiKeyInfo {
+  id: number;
+  name: string;
+  key_prefix: string;
+  created_at: number;
+}
+```
+
+#### `CreateKeyResponse`
+
+```typescript
+interface CreateKeyResponse {
+  id: number;
+  name: string;
+  key: string;       // valor bruto — retornado apenas na criação
+  key_prefix: string;
+  created_at: number;
+}
+```
+
 ### Erros
 
 Todos os erros herdam de `VectorDBError`:
@@ -361,6 +485,7 @@ pnpm typecheck
 
 ## 📝 Notas
 
+- **Autenticação:** use `apiKey` nas opções para rotas de dados; o SDK envia `Authorization: Bearer <apiKey>` em todas as requisições.
 - O SDK usa **Axios** para requisições HTTP com interceptors para tratamento de erros
 - Validação runtime com **Zod** para garantir tipos corretos
 - Retry automático com **exponential backoff** para erros de servidor (5xx) e conexão

@@ -30,6 +30,10 @@ export interface CollectionConfig {
   name: string;
   dimension: number;
   distance: DistanceMetric;
+  /** Enable BM25 index for hybrid search (default: false). */
+  enable_bm25?: boolean;
+  /** Metadata key used as text for BM25 (default: "text"). */
+  bm25_text_field?: string;
 }
 
 export const CollectionConfigSchema = z.object({
@@ -38,6 +42,8 @@ export const CollectionConfigSchema = z.object({
   }),
   dimension: z.number().int().min(1).max(4096),
   distance: DistanceMetricSchema,
+  enable_bm25: z.boolean().optional(),
+  bm25_text_field: z.string().min(1).optional(),
 });
 
 // ─── Collection ────────────────────────────────────────────────────────────
@@ -142,10 +148,44 @@ export const SearchPointsResponseSchema = z.object({
   took_ms: z.number().int(),
 });
 
+// ─── API Keys ───────────────────────────────────────────────────────────────
+
+export interface ApiKeyInfo {
+  id: number;
+  name: string;
+  key_prefix: string;
+  created_at: number;
+}
+
+export const ApiKeyInfoSchema = z.object({
+  id: z.number().int(),
+  name: z.string(),
+  key_prefix: z.string(),
+  created_at: z.number().int(),
+});
+
+export interface CreateKeyResponse {
+  id: number;
+  name: string;
+  key: string;
+  key_prefix: string;
+  created_at: number;
+}
+
+export const CreateKeyResponseSchema = z.object({
+  id: z.number().int(),
+  name: z.string(),
+  key: z.string(),
+  key_prefix: z.string(),
+  created_at: z.number().int(),
+});
+
 // ─── Client Options ─────────────────────────────────────────────────────────
 
 export interface VectorDBClientOptions {
   baseUrl: string;
+  /** API key for authentication. All data routes require Authorization: Bearer <apiKey>. */
+  apiKey?: string;
   timeout?: number;
   maxRetries?: number;
   retryDelay?: number;
@@ -153,6 +193,7 @@ export interface VectorDBClientOptions {
 
 export const VectorDBClientOptionsSchema = z.object({
   baseUrl: z.string().url(),
+  apiKey: z.string().min(1).optional(),
   timeout: z.number().int().positive().optional().default(30000),
   maxRetries: z.number().int().min(0).optional().default(3),
   retryDelay: z.number().int().positive().optional().default(1000),

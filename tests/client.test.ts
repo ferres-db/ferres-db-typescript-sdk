@@ -34,6 +34,28 @@ describe("VectorDBClient", () => {
     client = new VectorDBClient({ baseUrl });
   });
 
+  describe("constructor (apiKey)", () => {
+    it("should set Authorization header when apiKey is provided", () => {
+      const apiKey = "ferres_sk_abc123";
+      mockedAxios.create.mockClear();
+      new VectorDBClient({ baseUrl, apiKey });
+      expect(mockedAxios.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Authorization: `Bearer ${apiKey}`,
+          }),
+        }),
+      );
+    });
+
+    it("should not set Authorization header when apiKey is omitted", () => {
+      mockedAxios.create.mockClear();
+      new VectorDBClient({ baseUrl });
+      const call = mockedAxios.create.mock.calls[0][0];
+      expect(call.headers).not.toHaveProperty("Authorization");
+    });
+  });
+
   describe("createCollection", () => {
     it("should create a collection successfully", async () => {
       const config: CollectionConfig = {
@@ -65,6 +87,34 @@ describe("VectorDBClient", () => {
         name: "test-collection",
         dimension: 384,
         distance: DistanceMetric.Cosine,
+      });
+    });
+
+    it("should send enable_bm25 and bm25_text_field when provided", async () => {
+      const config: CollectionConfig = {
+        name: "docs",
+        dimension: 384,
+        distance: DistanceMetric.Cosine,
+        enable_bm25: true,
+        bm25_text_field: "content",
+      };
+      const mockResponse = {
+        name: "docs",
+        dimension: 384,
+        distance: DistanceMetric.Cosine,
+        created_at: 1234567890,
+      };
+      const mockRequest = vi.fn().mockResolvedValue(mockResponse);
+      (client as any).request = mockRequest;
+
+      await client.createCollection(config);
+
+      expect(mockRequest).toHaveBeenCalledWith("POST", "/api/v1/collections", {
+        name: "docs",
+        dimension: 384,
+        distance: DistanceMetric.Cosine,
+        enable_bm25: true,
+        bm25_text_field: "content",
       });
     });
   });
@@ -226,6 +276,74 @@ describe("VectorDBClient", () => {
           filter: { category: "test" },
         },
       );
+    });
+  });
+
+  describe("listKeys", () => {
+    it("should list API keys successfully", async () => {
+      const mockResponse = [
+        { id: 1, name: "key1", key_prefix: "ferres_sk_ab", created_at: 1000 },
+        { id: 2, name: "key2", key_prefix: "ferres_sk_cd", created_at: 2000 },
+      ];
+      const mockRequest = vi.fn().mockResolvedValue(mockResponse);
+      (client as any).request = mockRequest;
+
+      const result = await client.listKeys();
+
+      expect(result).toHaveLength(2);
+      expect(result[0]).toEqual({ id: 1, name: "key1", key_prefix: "ferres_sk_ab", created_at: 1000 });
+      expect(result[1]).toEqual({ id: 2, name: "key2", key_prefix: "ferres_sk_cd", created_at: 2000 });
+      expect(mockRequest).toHaveBeenCalledWith("GET", "/api/v1/keys");
+    });
+  });
+
+  describe("createKey", () => {
+    it("should create an API key and return raw key", async () => {
+      const mockResponse = {
+        id: 1,
+        name: "my-key",
+        key: "ferres_sk_raw_value_once",
+        key_prefix: "ferres_sk_ra",
+        created_at: 1234567890,
+      };
+      const mockRequest = vi.fn().mockResolvedValue(mockResponse);
+      (client as any).request = mockRequest;
+
+      const result = await client.createKey("my-key");
+
+      expect(result).toEqual(mockResponse);
+      expect(mockRequest).toHaveBeenCalledWith("POST", "/api/v1/keys", { name: "my-key" });
+    });
+
+    it("should trim key name", async () => {
+      const mockRequest = vi.fn().mockResolvedValue({
+        id: 1,
+        name: "trimmed",
+        key: "ferres_sk_x",
+        key_prefix: "ferres_sk_",
+        created_at: 0,
+      });
+      (client as any).request = mockRequest;
+
+      await client.createKey("  trimmed  ");
+
+      expect(mockRequest).toHaveBeenCalledWith("POST", "/api/v1/keys", { name: "trimmed" });
+    });
+
+    it("should throw InvalidPayloadError for empty name", async () => {
+      await expect(client.createKey("")).rejects.toThrow(InvalidPayloadError);
+      await expect(client.createKey("   ")).rejects.toThrow(InvalidPayloadError);
+    });
+  });
+
+  describe("deleteKey", () => {
+    it("should delete an API key by id", async () => {
+      const mockRequest = vi.fn().mockResolvedValue(undefined);
+      (client as any).request = mockRequest;
+
+      await client.deleteKey(42);
+
+      expect(mockRequest).toHaveBeenCalledWith("DELETE", "/api/v1/keys/42");
     });
   });
 });

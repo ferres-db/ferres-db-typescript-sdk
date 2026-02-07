@@ -4,10 +4,15 @@ import axios, {
   AxiosRequestConfig,
   InternalAxiosRequestConfig,
 } from "axios";
+import { z } from "zod";
 import {
+  ApiKeyInfo,
   Collection,
   CollectionConfig,
   CollectionListItem,
+  CreateKeyResponse,
+  CreateKeyResponseSchema,
+  ApiKeyInfoSchema,
   DistanceMetric,
   Point,
   SearchQuery,
@@ -37,34 +42,40 @@ const MAX_BATCH_SIZE = 1000;
  */
 export class VectorDBClient {
   private readonly axiosInstance: AxiosInstance;
+  private readonly apiKey: string | undefined;
   private readonly maxRetries: number;
   private readonly retryDelay: number;
 
   /**
    * Initialize the VectorDB client.
    *
-   * @param options - Client configuration options
+   * @param options - Client configuration options (apiKey required for protected routes)
    */
   constructor(options: VectorDBClientOptions) {
     // Validate options
     const validatedOptions = VectorDBClientOptionsSchema.parse(options);
 
+    this.apiKey = validatedOptions.apiKey;
     this.maxRetries = validatedOptions.maxRetries ?? 3;
     this.retryDelay = validatedOptions.retryDelay ?? 1000;
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (this.apiKey) {
+      headers["Authorization"] = `Bearer ${this.apiKey}`;
+    }
 
     // Create axios instance
     this.axiosInstance = axios.create({
       baseURL: validatedOptions.baseUrl.replace(/\/$/, ""),
       timeout: validatedOptions.timeout ?? 30000,
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers,
     });
 
-    // Setup request interceptor for logging
+    // Setup request interceptor (e.g. for logging; Authorization already set above)
     this.axiosInstance.interceptors.request.use(
       (config: InternalAxiosRequestConfig) => {
-        // Can add request logging here if needed
         return config;
       },
       (error) => {
@@ -189,14 +200,21 @@ export class VectorDBClient {
    * @returns Created collection
    */
   async createCollection(config: CollectionConfig): Promise<Collection> {
+    const body: Record<string, unknown> = {
+      name: config.name,
+      dimension: config.dimension,
+      distance: config.distance,
+    };
+    if (config.enable_bm25 !== undefined) {
+      body.enable_bm25 = config.enable_bm25;
+    }
+    if (config.bm25_text_field !== undefined) {
+      body.bm25_text_field = config.bm25_text_field;
+    }
     const response = await this.request<Collection>(
       "POST",
       "/api/v1/collections",
-      {
-        name: config.name,
-        dimension: config.dimension,
-        distance: config.distance,
-      },
+      body,
     );
 
     return CollectionSchema.parse(response);
@@ -330,6 +348,42 @@ export class VectorDBClient {
     const validated = SearchPointsResponseSchema.parse(response);
     return validated.results;
   }
+
+  /**
+   * List API keys (requires valid API key with Editor/Admin role).
+   *
+   * @returns List of API key metadata (without raw key values)
+   */
+  async listKeys(): Promise<ApiKeyInfo[]> {
+    const response = await this.request<ApiKeyInfo[]>("GET", "/api/v1/keys");
+    return z.array(ApiKeyInfoSchema).parse(response);
+  }
+
+  /**
+   * Create a new API key. The raw key is returned only once; store it securely.
+   *
+   * @param name - Display name for the key
+   * @returns Created key info including the raw `key` (only time it is returned)
+   */
+  async createKey(name: string): Promise<CreateKeyResponse> {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      throw new InvalidPayloadError("name is required");
+    }
+    const response = await this.request<CreateKeyResponse>("POST", "/api/v1/keys", {
+      name: trimmed,
+    });
+    return CreateKeyResponseSchema.parse(response);
+  }
+
+  /**
+   * Delete an API key by id.
+   *
+   * @param id - Numeric id of the key (from listKeys or createKey)
+   */
+  async deleteKey(id: number): Promise<void> {
+    await this.request("DELETE", `/api/v1/keys/${id}`);
+  }
 }
 
 /**
@@ -342,4 +396,7 @@ export interface IVectorDBClient {
   upsertPoints(collection: string, points: Point[]): Promise<UpsertResult>;
   deletePoints(collection: string, ids: string[]): Promise<void>;
   search(collection: string, query: SearchQuery): Promise<SearchResult[]>;
+  listKeys(): Promise<ApiKeyInfo[]>;
+  createKey(name: string): Promise<CreateKeyResponse>;
+  deleteKey(id: number): Promise<void>;
 }
