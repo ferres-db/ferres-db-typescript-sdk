@@ -14,7 +14,13 @@ import {
   CreateKeyResponseSchema,
   ApiKeyInfoSchema,
   DistanceMetric,
+  EstimateSearchQuery,
+  EstimateSearchResponse,
+  EstimateSearchResponseSchema,
+  ExplainSearchQuery,
   Point,
+  SearchExplanation,
+  SearchExplanationSchema,
   SearchQuery,
   SearchResult,
   UpsertResult,
@@ -89,17 +95,16 @@ export class VectorDBClient {
       (error: AxiosError) => {
         if (error.response) {
           // API returned an error response
-          const errorData = error.response.data as {
-            error?: string;
-            message?: string;
-            code?: number;
-          };
+          const errorData = error.response.data as Record<string, unknown>;
 
-          const errorType = errorData.error || "unknown";
-          const message = errorData.message || error.message || "Unknown error";
-          const code = errorData.code || error.response.status;
+          const errorType = (errorData.error as string) || "unknown";
+          const message =
+            (errorData.message as string) || error.message || "Unknown error";
+          const code =
+            (errorData.code as number) || error.response.status;
 
-          throw createErrorFromResponse(errorType, message, code);
+          // Pass the full error body as extra context (e.g. for budget_exceeded estimate)
+          throw createErrorFromResponse(errorType, message, code, errorData);
         } else if (error.request) {
           // Request was made but no response received
           throw new ConnectionError(`No response received: ${error.message}`);
@@ -160,16 +165,13 @@ export class VectorDBClient {
         // Handle axios errors that weren't caught by interceptor
         if (axios.isAxiosError(error)) {
           if (error.response) {
-            const errorData = error.response.data as {
-              error?: string;
-              message?: string;
-              code?: number;
-            };
-            const errorType = errorData.error || "unknown";
+            const errorData = error.response.data as Record<string, unknown>;
+            const errorType = (errorData.error as string) || "unknown";
             const message =
-              errorData.message || error.message || "Unknown error";
-            const code = errorData.code || error.response.status;
-            throw createErrorFromResponse(errorType, message, code);
+              (errorData.message as string) || error.message || "Unknown error";
+            const code =
+              (errorData.code as number) || error.response.status;
+            throw createErrorFromResponse(errorType, message, code, errorData);
           } else if (error.request) {
             throw new ConnectionError(`No response received: ${error.message}`);
           }
@@ -329,21 +331,25 @@ export class VectorDBClient {
    * Search for similar vectors in a collection.
    *
    * @param collection - Collection name
-   * @param query - Search query with vector, limit, and optional filter
+   * @param query - Search query with vector, limit, optional filter, and optional budget_ms
    * @returns List of search results sorted by similarity
+   * @throws {BudgetExceededError} If budget_ms is set and estimated cost exceeds it (HTTP 422)
    */
   async search(
     collection: string,
     query: SearchQuery,
   ): Promise<SearchResult[]> {
-    const response = await this.request<{
-      results: SearchResult[];
-      took_ms: number;
-    }>("POST", `/api/v1/collections/${collection}/search`, {
+    const body: Record<string, unknown> = {
       vector: query.vector,
       limit: query.limit,
       ...(query.filter && { filter: query.filter }),
-    });
+      ...(query.budget_ms !== undefined && { budget_ms: query.budget_ms }),
+    };
+
+    const response = await this.request<{
+      results: SearchResult[];
+      took_ms: number;
+    }>("POST", `/api/v1/collections/${collection}/search`, body);
 
     const validated = SearchPointsResponseSchema.parse(response);
     return validated.results;
@@ -370,9 +376,13 @@ export class VectorDBClient {
     if (!trimmed) {
       throw new InvalidPayloadError("name is required");
     }
-    const response = await this.request<CreateKeyResponse>("POST", "/api/v1/keys", {
-      name: trimmed,
-    });
+    const response = await this.request<CreateKeyResponse>(
+      "POST",
+      "/api/v1/keys",
+      {
+        name: trimmed,
+      },
+    );
     return CreateKeyResponseSchema.parse(response);
   }
 
@@ -383,6 +393,74 @@ export class VectorDBClient {
    */
   async deleteKey(id: number): Promise<void> {
     await this.request("DELETE", `/api/v1/keys/${id}`);
+  }
+
+  // ─── Query Cost Estimation ────────────────────────────────────────────
+
+  /**
+   * Estimate the cost of a search query **before** executing it.
+   *
+   * Returns estimated latency, memory consumption, HNSW nodes visited,
+   * whether the query is "expensive", and optimisation recommendations.
+   *
+   * @param collection - Collection name
+   * @param query - Estimate query with limit, optional filter, and optional include_history
+   * @returns Detailed cost estimate (and optional historical percentiles)
+   * @throws {CollectionNotFoundError} If collection doesn't exist
+   */
+  async estimateSearchCost(
+    collection: string,
+    query: EstimateSearchQuery,
+  ): Promise<EstimateSearchResponse> {
+    const body: Record<string, unknown> = {
+      limit: query.limit,
+      ...(query.filter && { filter: query.filter }),
+      ...(query.include_history !== undefined && {
+        include_history: query.include_history,
+      }),
+    };
+
+    const response = await this.request<EstimateSearchResponse>(
+      "POST",
+      `/api/v1/collections/${collection}/search/estimate`,
+      body,
+    );
+
+    return EstimateSearchResponseSchema.parse(response);
+  }
+
+  // ─── Explain Query ────────────────────────────────────────────────────
+
+  /**
+   * Search with a detailed explanation of each result.
+   *
+   * Returns **why** each result was returned (or filtered): score breakdown,
+   * per-condition filter evaluation, ranking before/after filters, and HNSW
+   * index statistics.
+   *
+   * @param collection - Collection name
+   * @param query - Explain query with vector, limit, and optional filter
+   * @returns Full explanation per result
+   * @throws {CollectionNotFoundError} If collection doesn't exist
+   * @throws {InvalidDimensionError} If vector dimension doesn't match collection
+   */
+  async searchExplain(
+    collection: string,
+    query: ExplainSearchQuery,
+  ): Promise<SearchExplanation> {
+    const body: Record<string, unknown> = {
+      vector: query.vector,
+      limit: query.limit,
+      ...(query.filter && { filter: query.filter }),
+    };
+
+    const response = await this.request<SearchExplanation>(
+      "POST",
+      `/api/v1/collections/${collection}/search/explain`,
+      body,
+    );
+
+    return SearchExplanationSchema.parse(response);
   }
 }
 
@@ -396,6 +474,14 @@ export interface IVectorDBClient {
   upsertPoints(collection: string, points: Point[]): Promise<UpsertResult>;
   deletePoints(collection: string, ids: string[]): Promise<void>;
   search(collection: string, query: SearchQuery): Promise<SearchResult[]>;
+  estimateSearchCost(
+    collection: string,
+    query: EstimateSearchQuery,
+  ): Promise<EstimateSearchResponse>;
+  searchExplain(
+    collection: string,
+    query: ExplainSearchQuery,
+  ): Promise<SearchExplanation>;
   listKeys(): Promise<ApiKeyInfo[]>;
   createKey(name: string): Promise<CreateKeyResponse>;
   deleteKey(id: number): Promise<void>;
