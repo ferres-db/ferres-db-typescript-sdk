@@ -68,6 +68,21 @@ export class InternalError extends VectorDBError {
 }
 
 /**
+ * Raised when estimated query cost exceeds the specified budget_ms (HTTP 422).
+ * The `estimate` field contains the detailed cost estimate from the server.
+ */
+export class BudgetExceededError extends VectorDBError {
+  public readonly estimate: Record<string, unknown>;
+
+  constructor(message: string, estimate?: Record<string, unknown>) {
+    super(message, 422);
+    this.name = "BudgetExceededError";
+    this.estimate = estimate ?? {};
+    Object.setPrototypeOf(this, BudgetExceededError.prototype);
+  }
+}
+
+/**
  * Raised when there's a connection error.
  */
 export class ConnectionError extends VectorDBError {
@@ -91,12 +106,24 @@ const ERROR_MAP: Record<string, new (message: string) => VectorDBError> = {
 
 /**
  * Creates an appropriate error instance from an API error response.
+ *
+ * @param errorType - The error type string from the API response
+ * @param message - Human-readable error message
+ * @param _code - HTTP status code
+ * @param extra - Additional fields from the error response body (e.g. `estimate`)
  */
 export function createErrorFromResponse(
   errorType: string,
   message: string,
   _code?: number,
+  extra?: Record<string, unknown>,
 ): VectorDBError {
+  // Handle budget_exceeded specially (includes estimate in body)
+  if (errorType === "budget_exceeded") {
+    const estimate = (extra?.estimate ?? {}) as Record<string, unknown>;
+    return new BudgetExceededError(message, estimate);
+  }
+
   const ErrorClass = ERROR_MAP[errorType] || VectorDBError;
 
   // Special handling for collection errors that need the collection name

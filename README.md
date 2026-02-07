@@ -36,8 +36,8 @@ docker run -d \
   ferresdb/ferres-db-core
 ```
 
-- **API:** http://localhost:8080  
-- `FERRESDB_API_KEYS`: chave(s) de API aceitas pelo servidor (opcional; se omitir, use uma chave criada depois via dashboard ou API de keys, se disponível).  
+- **API:** http://localhost:8080
+- `FERRESDB_API_KEYS`: chave(s) de API aceitas pelo servidor (opcional; se omitir, use uma chave criada depois via dashboard ou API de keys, se disponível).
 - O volume `ferres-data` persiste coleções e dados entre reinícios.
 
 ### Subir o frontend (dashboard)
@@ -53,8 +53,8 @@ docker run -d \
   ferresdb/ferres-db-frontend
 ```
 
-- **Dashboard:** http://localhost:3000  
-- `VITE_API_BASE_URL`: URL do backend (ajuste se o backend estiver em outro host/porta).  
+- **Dashboard:** http://localhost:3000
+- `VITE_API_BASE_URL`: URL do backend (ajuste se o backend estiver em outro host/porta).
 - `VITE_API_KEY`: mesma chave configurada no backend, para o dashboard autenticar.
 
 Se o navegador acessar o frontend em uma máquina diferente do host onde o backend roda, use a URL acessível do backend em `VITE_API_BASE_URL` (ex.: `http://ip-do-servidor:8080`).
@@ -64,11 +64,11 @@ Se o navegador acessar o frontend em uma máquina diferente do host onde o backe
 Com o backend no ar em `http://localhost:8080` e a mesma API key:
 
 ```typescript
-import { VectorDBClient } from '@ferres-db/typescript-sdk';
+import { VectorDBClient } from "@ferres-db/typescript-sdk";
 
 const client = new VectorDBClient({
-  baseUrl: 'http://localhost:8080',
-  apiKey: 'ferres_sk_sua_chave_aqui',
+  baseUrl: "http://localhost:8080",
+  apiKey: "ferres_sk_sua_chave_aqui",
 });
 // criar coleções, upsert, search, etc.
 ```
@@ -81,8 +81,8 @@ Todas as rotas de dados (coleções, pontos, busca, API keys) exigem autenticaç
 
 ```typescript
 const client = new VectorDBClient({
-  baseUrl: 'http://localhost:8080',
-  apiKey: 'ferres_sk_...', // obrigatório para rotas protegidas
+  baseUrl: "http://localhost:8080",
+  apiKey: "ferres_sk_...", // obrigatório para rotas protegidas
 });
 ```
 
@@ -91,44 +91,44 @@ Sem `apiKey`, o servidor responderá 401 em rotas protegidas.
 ### Exemplo Básico
 
 ```typescript
-import { VectorDBClient, DistanceMetric } from '@ferres-db/typescript-sdk';
+import { VectorDBClient, DistanceMetric } from "@ferres-db/typescript-sdk";
 
 // Cria uma instância do cliente (apiKey necessário para criar/listar coleções, etc.)
 const client = new VectorDBClient({
-  baseUrl: 'http://localhost:8080',
-  apiKey: 'ferres_sk_...',
+  baseUrl: "http://localhost:8080",
+  apiKey: "ferres_sk_...",
   timeout: 30000,
 });
 
 // Cria uma coleção
 const collection = await client.createCollection({
-  name: 'documents',
+  name: "documents",
   dimension: 384, // Dimensão dos vetores (ex: all-MiniLM-L6-v2)
   distance: DistanceMetric.Cosine,
 });
 
-console.log('Coleção criada:', collection.name);
+console.log("Coleção criada:", collection.name);
 
 // Insere pontos
 const points = [
   {
-    id: 'doc-1',
-    vector: [0.1, 0.2, 0.3, /* ... 384 dimensões */],
-    metadata: { text: 'Primeiro documento', category: 'tech' },
+    id: "doc-1",
+    vector: [0.1, 0.2, 0.3 /* ... 384 dimensões */],
+    metadata: { text: "Primeiro documento", category: "tech" },
   },
   {
-    id: 'doc-2',
-    vector: [0.4, 0.5, 0.6, /* ... 384 dimensões */],
-    metadata: { text: 'Segundo documento', category: 'science' },
+    id: "doc-2",
+    vector: [0.4, 0.5, 0.6 /* ... 384 dimensões */],
+    metadata: { text: "Segundo documento", category: "science" },
   },
 ];
 
-const result = await client.upsertPoints('documents', points);
+const result = await client.upsertPoints("documents", points);
 console.log(`Inseridos: ${result.upserted}, Falhos: ${result.failed.length}`);
 
 // Busca os 5 pontos mais similares
-const queryVector = [0.15, 0.25, 0.35, /* ... 384 dimensões */];
-const results = await client.search('documents', {
+const queryVector = [0.15, 0.25, 0.35 /* ... 384 dimensões */];
+const results = await client.search("documents", {
   vector: queryVector,
   limit: 5,
 });
@@ -142,7 +142,7 @@ for (const result of results) {
 ### Exemplo com Embeddings Reais
 
 ```typescript
-import { VectorDBClient, DistanceMetric } from '@ferres-db/typescript-sdk';
+import { VectorDBClient, DistanceMetric } from "@ferres-db/typescript-sdk";
 
 // Assumindo que você tem uma função que gera embeddings
 async function generateEmbedding(text: string): Promise<number[]> {
@@ -153,22 +153,22 @@ async function generateEmbedding(text: string): Promise<number[]> {
 
 async function main() {
   const client = new VectorDBClient({
-    baseUrl: 'http://localhost:8080',
-    apiKey: 'ferres_sk_...',
+    baseUrl: "http://localhost:8080",
+    apiKey: "ferres_sk_...",
   });
 
   // Cria a coleção
   await client.createCollection({
-    name: 'documents',
+    name: "documents",
     dimension: 384,
     distance: DistanceMetric.Cosine,
   });
 
   // Indexa documentos
   const documents = [
-    'Rust é uma linguagem de programação',
-    'Python é popular para machine learning',
-    'Vector databases são úteis para RAG',
+    "Rust é uma linguagem de programação",
+    "Python é popular para machine learning",
+    "Vector databases são úteis para RAG",
   ];
 
   const points = [];
@@ -181,19 +181,19 @@ async function main() {
     });
   }
 
-  await client.upsertPoints('documents', points);
+  await client.upsertPoints("documents", points);
 
   // Busca semântica
-  const queryEmbedding = await generateEmbedding('linguagem de programação');
-  const results = await client.search('documents', {
+  const queryEmbedding = await generateEmbedding("linguagem de programação");
+  const results = await client.search("documents", {
     vector: queryEmbedding,
     limit: 3,
   });
 
-  console.log('Documentos mais similares:');
+  console.log("Documentos mais similares:");
   for (const result of results) {
     console.log(
-      `  - ${result.metadata.text} (similaridade: ${result.score.toFixed(4)})`
+      `  - ${result.metadata.text} (similaridade: ${result.score.toFixed(4)})`,
     );
   }
 }
@@ -204,19 +204,19 @@ main().catch(console.error);
 ### Exemplo com Filtros
 
 ```typescript
-import { VectorDBClient } from '@ferres-db/typescript-sdk';
+import { VectorDBClient } from "@ferres-db/typescript-sdk";
 
 const client = new VectorDBClient({
-  baseUrl: 'http://localhost:8080',
-  apiKey: 'ferres_sk_...',
+  baseUrl: "http://localhost:8080",
+  apiKey: "ferres_sk_...",
 });
 
 // Busca com filtro de metadata
-const results = await client.search('documents', {
+const results = await client.search("documents", {
   vector: queryVector,
   limit: 10,
   filter: {
-    category: 'tech', // Apenas documentos com category='tech'
+    category: "tech", // Apenas documentos com category='tech'
   },
 });
 ```
@@ -229,28 +229,28 @@ import {
   CollectionNotFoundError,
   CollectionAlreadyExistsError,
   InvalidDimensionError,
-} from '@ferres-db/typescript-sdk';
+} from "@ferres-db/typescript-sdk";
 
 const client = new VectorDBClient({
-  baseUrl: 'http://localhost:8080',
-  apiKey: 'ferres_sk_...',
+  baseUrl: "http://localhost:8080",
+  apiKey: "ferres_sk_...",
   maxRetries: 5, // Número máximo de tentativas
   retryDelay: 1000, // Delay inicial em ms (exponential backoff)
 });
 
 try {
   await client.createCollection({
-    name: 'my-collection',
+    name: "my-collection",
     dimension: 384,
     distance: DistanceMetric.Cosine,
   });
 } catch (error) {
   if (error instanceof CollectionAlreadyExistsError) {
-    console.log('Coleção já existe');
+    console.log("Coleção já existe");
   } else if (error instanceof InvalidDimensionError) {
-    console.error('Dimensão inválida:', error.message);
+    console.error("Dimensão inválida:", error.message);
   } else {
-    console.error('Erro desconhecido:', error);
+    console.error("Erro desconhecido:", error);
   }
 }
 ```
@@ -280,6 +280,7 @@ new VectorDBClient(options: VectorDBClientOptions)
 Cria uma nova coleção.
 
 **Parâmetros:**
+
 - `config.name` (string): Nome da coleção (apenas letras, números, hífens e underscores)
 - `config.dimension` (number): Dimensão dos vetores (1-4096)
 - `config.distance` (DistanceMetric): Métrica de distância
@@ -289,6 +290,7 @@ Cria uma nova coleção.
 **Retorna:** Coleção criada
 
 **Erros:**
+
 - `CollectionAlreadyExistsError`: Se a coleção já existe
 - `InvalidDimensionError`: Se a dimensão é inválida
 - `InvalidPayloadError`: Se o payload é inválido
@@ -304,9 +306,11 @@ Lista todas as coleções.
 Remove uma coleção.
 
 **Parâmetros:**
+
 - `name` (string): Nome da coleção
 
 **Erros:**
+
 - `CollectionNotFoundError`: Se a coleção não existe
 
 ##### `upsertPoints(collection: string, points: Point[]): Promise<UpsertResult>`
@@ -314,12 +318,14 @@ Remove uma coleção.
 Insere ou atualiza pontos em uma coleção. Automaticamente faz batching se houver mais de 1000 pontos.
 
 **Parâmetros:**
+
 - `collection` (string): Nome da coleção
 - `points` (Point[]): Array de pontos para inserir/atualizar
 
 **Retorna:** Resultado com número de pontos inseridos e lista de falhas
 
 **Erros:**
+
 - `CollectionNotFoundError`: Se a coleção não existe
 - `InvalidDimensionError`: Se as dimensões dos vetores não correspondem
 
@@ -328,10 +334,12 @@ Insere ou atualiza pontos em uma coleção. Automaticamente faz batching se houv
 Remove pontos de uma coleção pelos IDs.
 
 **Parâmetros:**
+
 - `collection` (string): Nome da coleção
 - `ids` (string[]): Array de IDs dos pontos a remover
 
 **Erros:**
+
 - `CollectionNotFoundError`: Se a coleção não existe
 - `InvalidPayloadError`: Se o array de IDs está vazio
 
@@ -340,6 +348,7 @@ Remove pontos de uma coleção pelos IDs.
 Busca pontos similares a um vetor de consulta.
 
 **Parâmetros:**
+
 - `collection` (string): Nome da coleção
 - `query.vector` (number[]): Vetor de consulta
 - `query.limit` (number): Número máximo de resultados
@@ -348,6 +357,7 @@ Busca pontos similares a um vetor de consulta.
 **Retorna:** Array de resultados ordenados por similaridade
 
 **Erros:**
+
 - `CollectionNotFoundError`: Se a coleção não existe
 - `InvalidDimensionError`: Se a dimensão do vetor não corresponde
 
@@ -377,9 +387,9 @@ Remove uma API key pelo id (retornado por `listKeys` ou `createKey`).
 
 ```typescript
 enum DistanceMetric {
-  Cosine = 'Cosine',
-  DotProduct = 'DotProduct',
-  Euclidean = 'Euclidean',
+  Cosine = "Cosine",
+  DotProduct = "DotProduct",
+  Euclidean = "Euclidean",
 }
 ```
 
@@ -443,7 +453,7 @@ interface ApiKeyInfo {
 interface CreateKeyResponse {
   id: number;
   name: string;
-  key: string;       // valor bruto — retornado apenas na criação
+  key: string; // valor bruto — retornado apenas na criação
   key_prefix: string;
   created_at: number;
 }
