@@ -260,16 +260,16 @@ export const EstimateSearchQuerySchema = z.object({
 export interface ConditionResult {
   field: string;
   operator: string;
-  expected: unknown;
-  actual: unknown;
+  expected?: unknown;
+  actual?: unknown;
   passed: boolean;
 }
 
 export const ConditionResultSchema = z.object({
   field: z.string(),
   operator: z.string(),
-  expected: z.unknown(),
-  actual: z.unknown(),
+  expected: z.unknown().optional(),
+  actual: z.unknown().optional(),
   passed: z.boolean(),
 });
 
@@ -289,7 +289,7 @@ export interface ExplainResult {
   distance_metric: string;
   raw_distance: number;
   score_breakdown: Record<string, number>;
-  filter_evaluation?: FilterExplanation;
+  filter_evaluation?: FilterExplanation | null;
   rank_before_filter: number;
   rank_after_filter: number;
 }
