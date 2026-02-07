@@ -201,9 +201,7 @@ export class RealtimeClient extends EventEmitter {
 
   private ensureConnected(): void {
     if (!this.connected || !this.ws) {
-      throw new Error(
-        "RealtimeClient is not connected. Call connect() first.",
-      );
+      throw new Error("RealtimeClient is not connected. Call connect() first.");
     }
   }
 
@@ -274,9 +272,7 @@ export class RealtimeClient extends EventEmitter {
         };
         // If we're waiting for an ack, reject it with the error
         if (this.pendingAck) {
-          this.pendingAck.reject(
-            new VectorDBError(error.message, error.code),
-          );
+          this.pendingAck.reject(new VectorDBError(error.message, error.code));
           this.pendingAck = null;
         }
         this.emit("error", error);
