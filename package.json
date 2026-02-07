@@ -25,6 +25,10 @@
   "keywords": ["vector-database", "embeddings", "similarity-search", "hnsw", "typescript"],
   "author": "",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ferres-db/ferres-db-typescript-sdk.git"
+  },
   "dependencies": {
     "axios": "^1.7.9",
     "zod": "^3.24.1"
