@@ -266,9 +266,7 @@ describe("RealtimeClient", () => {
 
   describe("ensureConnected", () => {
     it("should throw when not connected", () => {
-      expect(() => (client as any).ensureConnected()).toThrow(
-        "not connected",
-      );
+      expect(() => (client as any).ensureConnected()).toThrow("not connected");
     });
   });
 });

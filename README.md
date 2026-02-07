@@ -502,6 +502,12 @@ pnpm typecheck
 - Suporte para **ESM** e **CJS** exports
 - Batching automático para operações de upsert com mais de 1000 pontos
 
+## gRPC API
+
+O FerresDB também oferece uma API gRPC nativa (porta 50051 por padrão) como alternativa à API REST. Este SDK usa a API REST; para usar gRPC diretamente, gere stubs de cliente a partir do arquivo `proto/ferresdb.proto` no repositório do servidor (requer `--features grpc` no build do server).
+
+Para gerar stubs gRPC em TypeScript, use o pacote `@grpc/proto-loader` ou `protoc` com o plugin `grpc_tools_node_protoc_ts`.
+
 ## 📄 Licença
 
 MIT

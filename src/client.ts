@@ -24,13 +24,21 @@ import {
   HybridSearchQuery,
   ListPointsResult,
   ListPointsResultSchema,
+  ListReindexJobsResponse,
+  ListReindexJobsResponseSchema,
   Point,
   PointDetail,
   PointDetailSchema,
+  ReindexJob,
+  ReindexJobSchema,
   SearchExplanation,
   SearchExplanationSchema,
   SearchPointsResponse,
   SearchQuery,
+  StartReindexResponse,
+  StartReindexResponseSchema,
+  TierDistribution,
+  TierDistributionSchema,
   UpsertResult,
   VectorDBClientOptions,
   VectorDBClientOptionsSchema,
@@ -222,6 +230,9 @@ export class VectorDBClient {
     if (config.quantization !== undefined) {
       body.quantization = config.quantization;
     }
+    if (config.tiered_storage !== undefined) {
+      body.tiered_storage = config.tiered_storage;
+    }
     const response = await this.request<Collection>(
       "POST",
       "/api/v1/collections",
@@ -379,6 +390,27 @@ export class VectorDBClient {
     return SearchPointsResponseSchema.parse(response);
   }
 
+  // ─── Tiered Storage ──────────────────────────────────────────────────
+
+  /**
+   * Get the distribution of points across storage tiers for a collection.
+   *
+   * Returns the count and estimated memory usage for each tier (Hot, Warm, Cold).
+   * When tiered storage is not enabled, all points are reported as Hot.
+   *
+   * @param name - Collection name
+   * @returns Tier distribution with point counts and memory estimates per tier
+   * @throws {CollectionNotFoundError} If collection doesn't exist
+   */
+  async getTierDistribution(name: string): Promise<TierDistribution> {
+    const response = await this.request<TierDistribution>(
+      "GET",
+      `/api/v1/collections/${name}/tiers`,
+    );
+
+    return TierDistributionSchema.parse(response);
+  }
+
   /**
    * List API keys (requires valid API key with Editor/Admin role).
    *
@@ -507,6 +539,8 @@ export class VectorDBClient {
       query_vector: query.query_vector,
       limit: query.limit,
       ...(query.alpha !== undefined && { alpha: query.alpha }),
+      ...(query.fusion !== undefined && { fusion: query.fusion }),
+      ...(query.rrf_k !== undefined && { rrf_k: query.rrf_k }),
     };
 
     const response = await this.request<SearchPointsResponse>(
@@ -545,7 +579,11 @@ export class VectorDBClient {
    */
   async listPoints(
     collection: string,
-    options?: { limit?: number; offset?: number; filter?: Record<string, unknown> },
+    options?: {
+      limit?: number;
+      offset?: number;
+      filter?: Record<string, unknown>;
+    },
   ): Promise<ListPointsResult> {
     const params = new URLSearchParams();
     if (options?.limit !== undefined) {
@@ -564,6 +602,59 @@ export class VectorDBClient {
     const response = await this.request<ListPointsResult>("GET", path);
     return ListPointsResultSchema.parse(response);
   }
+
+  // ─── Reindex ──────────────────────────────────────────────────────────
+
+  /**
+   * Start a background reindex job for a collection.
+   *
+   * Rebuilds the ANN index from scratch without blocking searches.
+   * At most one reindex job can run per collection at a time.
+   *
+   * @param collection - Collection name
+   * @returns Response with the job ID and initial status
+   * @throws {CollectionNotFoundError} If collection doesn't exist
+   * @throws {CollectionAlreadyExistsError} If a reindex is already running
+   */
+  async startReindex(collection: string): Promise<StartReindexResponse> {
+    const response = await this.request<StartReindexResponse>(
+      "POST",
+      `/api/v1/collections/${collection}/reindex`,
+    );
+    return StartReindexResponseSchema.parse(response);
+  }
+
+  /**
+   * Get the status of a specific reindex job.
+   *
+   * @param collection - Collection name
+   * @param jobId - Reindex job ID
+   * @returns Current job status, progress, and statistics
+   * @throws {CollectionNotFoundError} If collection or job doesn't exist
+   */
+  async getReindexJob(collection: string, jobId: string): Promise<ReindexJob> {
+    const response = await this.request<ReindexJob>(
+      "GET",
+      `/api/v1/collections/${collection}/reindex/${jobId}`,
+    );
+    return ReindexJobSchema.parse(response);
+  }
+
+  /**
+   * List all reindex jobs for a collection (newest first).
+   *
+   * @param collection - Collection name
+   * @returns List of reindex jobs
+   * @throws {CollectionNotFoundError} If collection doesn't exist
+   */
+  async listReindexJobs(collection: string): Promise<ReindexJob[]> {
+    const response = await this.request<ListReindexJobsResponse>(
+      "GET",
+      `/api/v1/collections/${collection}/reindex`,
+    );
+    const validated = ListReindexJobsResponseSchema.parse(response);
+    return validated.jobs;
+  }
 }
 
 /**
@@ -576,10 +667,7 @@ export interface IVectorDBClient {
   deleteCollection(name: string): Promise<void>;
   upsertPoints(collection: string, points: Point[]): Promise<UpsertResult>;
   deletePoints(collection: string, ids: string[]): Promise<DeletePointsResult>;
-  search(
-    collection: string,
-    query: SearchQuery,
-  ): Promise<SearchPointsResponse>;
+  search(collection: string, query: SearchQuery): Promise<SearchPointsResponse>;
   hybridSearch(
     collection: string,
     query: HybridSearchQuery,
@@ -592,12 +680,20 @@ export interface IVectorDBClient {
     collection: string,
     query: ExplainSearchQuery,
   ): Promise<SearchExplanation>;
+  getTierDistribution(name: string): Promise<TierDistribution>;
   getPoint(collection: string, pointId: string): Promise<PointDetail>;
   listPoints(
     collection: string,
-    options?: { limit?: number; offset?: number; filter?: Record<string, unknown> },
+    options?: {
+      limit?: number;
+      offset?: number;
+      filter?: Record<string, unknown>;
+    },
   ): Promise<ListPointsResult>;
   listKeys(): Promise<ApiKeyInfo[]>;
   createKey(name: string): Promise<CreateKeyResponse>;
   deleteKey(id: number): Promise<void>;
+  startReindex(collection: string): Promise<StartReindexResponse>;
+  getReindexJob(collection: string, jobId: string): Promise<ReindexJob>;
+  listReindexJobs(collection: string): Promise<ReindexJob[]>;
 }

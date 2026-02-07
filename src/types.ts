@@ -53,14 +53,65 @@ export const ScalarQuantizationConfigSchema = z.object({
  * - `"None"` — no quantization (default)
  * - `{ Scalar: { dtype: "Int8", ... } }` — SQ8 compression
  */
-export type QuantizationConfig =
-  | "None"
-  | { Scalar: ScalarQuantizationConfig };
+export type QuantizationConfig = "None" | { Scalar: ScalarQuantizationConfig };
 
 export const QuantizationConfigSchema = z.union([
   z.literal("None"),
   z.object({ Scalar: ScalarQuantizationConfigSchema }),
 ]);
+
+// ─── Tiered Storage ─────────────────────────────────────────────────────────
+
+/**
+ * Configuration for tiered storage.
+ *
+ * When enabled, points are automatically moved between storage tiers
+ * (Hot/Warm/Cold) based on access frequency.
+ */
+export interface TieredStorageConfig {
+  /** Enable tiered storage (default: false). */
+  enabled: boolean;
+  /** Points accessed within this many hours stay in Hot (RAM). Default: 24. */
+  hot_threshold_hours?: number;
+  /** Points accessed within this many hours stay in Warm (mmap). Default: 168 (7 days). */
+  warm_threshold_hours?: number;
+  /** Interval between automatic compaction runs (seconds). Default: 3600. */
+  compaction_interval_secs?: number;
+}
+
+export const TieredStorageConfigSchema = z.object({
+  enabled: z.boolean(),
+  hot_threshold_hours: z.number().int().positive().optional(),
+  warm_threshold_hours: z.number().int().positive().optional(),
+  compaction_interval_secs: z.number().int().positive().optional(),
+});
+
+/**
+ * Distribution of points across storage tiers.
+ */
+export interface TierDistribution {
+  /** Number of points in the Hot tier (RAM). */
+  hot: number;
+  /** Number of points in the Warm tier (mmap). */
+  warm: number;
+  /** Number of points in the Cold tier (disk). */
+  cold: number;
+  /** Estimated memory usage for the Hot tier (bytes). */
+  hot_memory_bytes: number;
+  /** Estimated memory usage for the Warm tier (bytes). */
+  warm_memory_bytes: number;
+  /** Estimated memory usage for the Cold tier (bytes). */
+  cold_memory_bytes: number;
+}
+
+export const TierDistributionSchema = z.object({
+  hot: z.number().int(),
+  warm: z.number().int(),
+  cold: z.number().int(),
+  hot_memory_bytes: z.number().int(),
+  warm_memory_bytes: z.number().int(),
+  cold_memory_bytes: z.number().int(),
+});
 
 // ─── Collection Config ──────────────────────────────────────────────────────
 
@@ -74,6 +125,8 @@ export interface CollectionConfig {
   bm25_text_field?: string;
   /** Vector quantization config. Use `{ Scalar: { dtype: "Int8" } }` for SQ8. */
   quantization?: QuantizationConfig;
+  /** Tiered storage config. When enabled, points move automatically between Hot/Warm/Cold tiers. */
+  tiered_storage?: TieredStorageConfig;
 }
 
 export const CollectionConfigSchema = z.object({
@@ -85,6 +138,7 @@ export const CollectionConfigSchema = z.object({
   enable_bm25: z.boolean().optional(),
   bm25_text_field: z.string().min(1).optional(),
   quantization: QuantizationConfigSchema.optional(),
+  tiered_storage: TieredStorageConfigSchema.optional(),
 });
 
 // ─── Collection ────────────────────────────────────────────────────────────
@@ -475,8 +529,12 @@ export interface HybridSearchQuery {
   query_vector: number[];
   /** Maximum number of results. */
   limit: number;
-  /** Weight for vector search score (0-1). BM25 weight = 1 - alpha. Default: 0.5. */
+  /** Weight for vector search score (0-1). BM25 weight = 1 - alpha. Default: 0.5. Used with fusion: "weighted". */
   alpha?: number;
+  /** Fusion strategy: "weighted" (default) or "rrf" (Reciprocal Rank Fusion). */
+  fusion?: "weighted" | "rrf";
+  /** RRF constant k (default: 60). Only used when fusion is "rrf". Higher values smooth rank differences. */
+  rrf_k?: number;
 }
 
 export const HybridSearchQuerySchema = z.object({
@@ -484,6 +542,80 @@ export const HybridSearchQuerySchema = z.object({
   query_vector: z.array(z.number()).min(1),
   limit: z.number().int().min(1),
   alpha: z.number().min(0).max(1).optional(),
+  fusion: z.enum(["weighted", "rrf"]).optional(),
+  rrf_k: z.number().int().min(1).optional(),
+});
+
+// ─── Reindex ─────────────────────────────────────────────────────────────────
+
+export enum ReindexStatus {
+  Queued = "Queued",
+  Building = "Building",
+  Swapping = "Swapping",
+  Completed = "Completed",
+  Failed = "Failed",
+}
+
+const ReindexStatusSchema = z.nativeEnum(ReindexStatus);
+
+export interface ReindexStats {
+  points_processed: number;
+  points_total: number;
+  tombstones_cleaned: number;
+  old_index_size_bytes: number;
+  new_index_size_bytes: number;
+}
+
+export const ReindexStatsSchema = z.object({
+  points_processed: z.number().int(),
+  points_total: z.number().int(),
+  tombstones_cleaned: z.number().int(),
+  old_index_size_bytes: z.number().int(),
+  new_index_size_bytes: z.number().int(),
+});
+
+export interface ReindexJob {
+  id: string;
+  collection: string;
+  status: ReindexStatus;
+  progress: number;
+  started_at: number;
+  completed_at?: number | null;
+  error?: string | null;
+  stats: ReindexStats;
+}
+
+export const ReindexJobSchema = z.object({
+  id: z.string(),
+  collection: z.string(),
+  status: ReindexStatusSchema,
+  progress: z.number(),
+  started_at: z.number(),
+  completed_at: z.number().nullable().optional(),
+  error: z.string().nullable().optional(),
+  stats: ReindexStatsSchema,
+});
+
+export interface StartReindexResponse {
+  job_id: string;
+  collection: string;
+  status: ReindexStatus;
+  message: string;
+}
+
+export const StartReindexResponseSchema = z.object({
+  job_id: z.string(),
+  collection: z.string(),
+  status: ReindexStatusSchema,
+  message: z.string(),
+});
+
+export interface ListReindexJobsResponse {
+  jobs: ReindexJob[];
+}
+
+export const ListReindexJobsResponseSchema = z.object({
+  jobs: z.array(ReindexJobSchema),
 });
 
 // ─── WebSocket Messages ─────────────────────────────────────────────────────
