@@ -9,20 +9,28 @@ import {
   ApiKeyInfo,
   Collection,
   CollectionConfig,
+  CollectionDetail,
   CollectionListItem,
   CreateKeyResponse,
   CreateKeyResponseSchema,
   ApiKeyInfoSchema,
-  DistanceMetric,
+  CollectionDetailSchema,
+  DeletePointsResult,
+  DeletePointsResultSchema,
   EstimateSearchQuery,
   EstimateSearchResponse,
   EstimateSearchResponseSchema,
   ExplainSearchQuery,
+  HybridSearchQuery,
+  ListPointsResult,
+  ListPointsResultSchema,
   Point,
+  PointDetail,
+  PointDetailSchema,
   SearchExplanation,
   SearchExplanationSchema,
+  SearchPointsResponse,
   SearchQuery,
-  SearchResult,
   UpsertResult,
   VectorDBClientOptions,
   VectorDBClientOptionsSchema,
@@ -100,8 +108,7 @@ export class VectorDBClient {
           const errorType = (errorData.error as string) || "unknown";
           const message =
             (errorData.message as string) || error.message || "Unknown error";
-          const code =
-            (errorData.code as number) || error.response.status;
+          const code = (errorData.code as number) || error.response.status;
 
           // Pass the full error body as extra context (e.g. for budget_exceeded estimate)
           throw createErrorFromResponse(errorType, message, code, errorData);
@@ -169,8 +176,7 @@ export class VectorDBClient {
             const errorType = (errorData.error as string) || "unknown";
             const message =
               (errorData.message as string) || error.message || "Unknown error";
-            const code =
-              (errorData.code as number) || error.response.status;
+            const code = (errorData.code as number) || error.response.status;
             throw createErrorFromResponse(errorType, message, code, errorData);
           } else if (error.request) {
             throw new ConnectionError(`No response received: ${error.message}`);
@@ -213,6 +219,9 @@ export class VectorDBClient {
     if (config.bm25_text_field !== undefined) {
       body.bm25_text_field = config.bm25_text_field;
     }
+    if (config.quantization !== undefined) {
+      body.quantization = config.quantization;
+    }
     const response = await this.request<Collection>(
       "POST",
       "/api/v1/collections",
@@ -227,21 +236,28 @@ export class VectorDBClient {
    *
    * @returns List of collections
    */
-  async listCollections(): Promise<Collection[]> {
+  async listCollections(): Promise<CollectionListItem[]> {
     const response = await this.request<{ collections: CollectionListItem[] }>(
       "GET",
       "/api/v1/collections",
     );
 
     const validated = ListCollectionsResponseSchema.parse(response);
+    return validated.collections;
+  }
 
-    // Convert CollectionListItem to Collection
-    return validated.collections.map((item) => ({
-      name: item.name,
-      dimension: item.dimension,
-      distance: DistanceMetric.Cosine, // API doesn't return distance in list, defaulting
-      created_at: item.created_at,
-    }));
+  /**
+   * Get detailed information about a single collection.
+   *
+   * @param name - Collection name
+   * @returns Collection details including num_points, distance, and stats
+   */
+  async getCollection(name: string): Promise<CollectionDetail> {
+    const response = await this.request<CollectionDetail>(
+      "GET",
+      `/api/v1/collections/${name}`,
+    );
+    return CollectionDetailSchema.parse(response);
   }
 
   /**
@@ -316,15 +332,23 @@ export class VectorDBClient {
    *
    * @param collection - Collection name
    * @param ids - List of point IDs to delete
+   * @returns The number of points actually deleted
    */
-  async deletePoints(collection: string, ids: string[]): Promise<void> {
+  async deletePoints(
+    collection: string,
+    ids: string[],
+  ): Promise<DeletePointsResult> {
     if (ids.length === 0) {
       throw new InvalidPayloadError("ids cannot be empty");
     }
 
-    await this.request("DELETE", `/api/v1/collections/${collection}/points`, {
-      ids,
-    });
+    const response = await this.request<DeletePointsResult>(
+      "DELETE",
+      `/api/v1/collections/${collection}/points`,
+      { ids },
+    );
+
+    return DeletePointsResultSchema.parse(response);
   }
 
   /**
@@ -332,13 +356,13 @@ export class VectorDBClient {
    *
    * @param collection - Collection name
    * @param query - Search query with vector, limit, optional filter, and optional budget_ms
-   * @returns List of search results sorted by similarity
+   * @returns Search response with results, took_ms, and optional query_id
    * @throws {BudgetExceededError} If budget_ms is set and estimated cost exceeds it (HTTP 422)
    */
   async search(
     collection: string,
     query: SearchQuery,
-  ): Promise<SearchResult[]> {
+  ): Promise<SearchPointsResponse> {
     const body: Record<string, unknown> = {
       vector: query.vector,
       limit: query.limit,
@@ -346,13 +370,13 @@ export class VectorDBClient {
       ...(query.budget_ms !== undefined && { budget_ms: query.budget_ms }),
     };
 
-    const response = await this.request<{
-      results: SearchResult[];
-      took_ms: number;
-    }>("POST", `/api/v1/collections/${collection}/search`, body);
+    const response = await this.request<SearchPointsResponse>(
+      "POST",
+      `/api/v1/collections/${collection}/search`,
+      body,
+    );
 
-    const validated = SearchPointsResponseSchema.parse(response);
-    return validated.results;
+    return SearchPointsResponseSchema.parse(response);
   }
 
   /**
@@ -462,6 +486,84 @@ export class VectorDBClient {
 
     return SearchExplanationSchema.parse(response);
   }
+
+  // ─── Hybrid Search ─────────────────────────────────────────────────────
+
+  /**
+   * Perform a hybrid search combining BM25 keyword matching and vector similarity.
+   *
+   * Requires the collection to have been created with `enable_bm25: true`.
+   *
+   * @param collection - Collection name (must have BM25 enabled)
+   * @param query - Hybrid query with query_text, query_vector, limit, and optional alpha
+   * @returns Search response with combined results
+   */
+  async hybridSearch(
+    collection: string,
+    query: HybridSearchQuery,
+  ): Promise<SearchPointsResponse> {
+    const body: Record<string, unknown> = {
+      query_text: query.query_text,
+      query_vector: query.query_vector,
+      limit: query.limit,
+      ...(query.alpha !== undefined && { alpha: query.alpha }),
+    };
+
+    const response = await this.request<SearchPointsResponse>(
+      "POST",
+      `/api/v1/collections/${collection}/search/hybrid`,
+      body,
+    );
+
+    return SearchPointsResponseSchema.parse(response);
+  }
+
+  // ─── Point Operations ──────────────────────────────────────────────────
+
+  /**
+   * Get a single point by ID, including its vector and metadata.
+   *
+   * @param collection - Collection name
+   * @param pointId - Unique point ID
+   * @returns Point details with id, vector, metadata, and created_at
+   */
+  async getPoint(collection: string, pointId: string): Promise<PointDetail> {
+    const response = await this.request<PointDetail>(
+      "GET",
+      `/api/v1/collections/${collection}/points/${pointId}`,
+    );
+
+    return PointDetailSchema.parse(response);
+  }
+
+  /**
+   * List points in a collection with pagination.
+   *
+   * @param collection - Collection name
+   * @param options - Pagination options (limit, offset, filter)
+   * @returns Paginated list of points
+   */
+  async listPoints(
+    collection: string,
+    options?: { limit?: number; offset?: number; filter?: Record<string, unknown> },
+  ): Promise<ListPointsResult> {
+    const params = new URLSearchParams();
+    if (options?.limit !== undefined) {
+      params.set("limit", String(options.limit));
+    }
+    if (options?.offset !== undefined) {
+      params.set("offset", String(options.offset));
+    }
+    if (options?.filter !== undefined) {
+      params.set("filter", JSON.stringify(options.filter));
+    }
+
+    const qs = params.toString();
+    const path = `/api/v1/collections/${collection}/points${qs ? `?${qs}` : ""}`;
+
+    const response = await this.request<ListPointsResult>("GET", path);
+    return ListPointsResultSchema.parse(response);
+  }
 }
 
 /**
@@ -469,11 +571,19 @@ export class VectorDBClient {
  */
 export interface IVectorDBClient {
   createCollection(config: CollectionConfig): Promise<Collection>;
-  listCollections(): Promise<Collection[]>;
+  listCollections(): Promise<CollectionListItem[]>;
+  getCollection(name: string): Promise<CollectionDetail>;
   deleteCollection(name: string): Promise<void>;
   upsertPoints(collection: string, points: Point[]): Promise<UpsertResult>;
-  deletePoints(collection: string, ids: string[]): Promise<void>;
-  search(collection: string, query: SearchQuery): Promise<SearchResult[]>;
+  deletePoints(collection: string, ids: string[]): Promise<DeletePointsResult>;
+  search(
+    collection: string,
+    query: SearchQuery,
+  ): Promise<SearchPointsResponse>;
+  hybridSearch(
+    collection: string,
+    query: HybridSearchQuery,
+  ): Promise<SearchPointsResponse>;
   estimateSearchCost(
     collection: string,
     query: EstimateSearchQuery,
@@ -482,6 +592,11 @@ export interface IVectorDBClient {
     collection: string,
     query: ExplainSearchQuery,
   ): Promise<SearchExplanation>;
+  getPoint(collection: string, pointId: string): Promise<PointDetail>;
+  listPoints(
+    collection: string,
+    options?: { limit?: number; offset?: number; filter?: Record<string, unknown> },
+  ): Promise<ListPointsResult>;
   listKeys(): Promise<ApiKeyInfo[]>;
   createKey(name: string): Promise<CreateKeyResponse>;
   deleteKey(id: number): Promise<void>;

@@ -24,6 +24,44 @@ export const PointSchema = z.object({
   metadata: z.record(z.unknown()).default({}),
 });
 
+// ─── Scalar Quantization (SQ8) ───────────────────────────────────────────
+
+export enum ScalarType {
+  Int8 = "Int8",
+}
+
+const ScalarTypeSchema = z.nativeEnum(ScalarType);
+
+export interface ScalarQuantizationConfig {
+  dtype: ScalarType;
+  /** Keep original f32 vectors in RAM for re-ranking (default: false). */
+  always_ram?: boolean;
+  /** Percentile used for min/max calibration, 0-100 (default: 99.5). */
+  quantile?: number;
+}
+
+export const ScalarQuantizationConfigSchema = z.object({
+  dtype: ScalarTypeSchema,
+  always_ram: z.boolean().optional(),
+  quantile: z.number().min(0).max(100).optional(),
+});
+
+/**
+ * Quantization configuration for a collection.
+ *
+ * Matches the server's tagged-enum format:
+ * - `"None"` — no quantization (default)
+ * - `{ Scalar: { dtype: "Int8", ... } }` — SQ8 compression
+ */
+export type QuantizationConfig =
+  | "None"
+  | { Scalar: ScalarQuantizationConfig };
+
+export const QuantizationConfigSchema = z.union([
+  z.literal("None"),
+  z.object({ Scalar: ScalarQuantizationConfigSchema }),
+]);
+
 // ─── Collection Config ──────────────────────────────────────────────────────
 
 export interface CollectionConfig {
@@ -34,6 +72,8 @@ export interface CollectionConfig {
   enable_bm25?: boolean;
   /** Metadata key used as text for BM25 (default: "text"). */
   bm25_text_field?: string;
+  /** Vector quantization config. Use `{ Scalar: { dtype: "Int8" } }` for SQ8. */
+  quantization?: QuantizationConfig;
 }
 
 export const CollectionConfigSchema = z.object({
@@ -44,6 +84,7 @@ export const CollectionConfigSchema = z.object({
   distance: DistanceMetricSchema,
   enable_bm25: z.boolean().optional(),
   bm25_text_field: z.string().min(1).optional(),
+  quantization: QuantizationConfigSchema.optional(),
 });
 
 // ─── Collection ────────────────────────────────────────────────────────────
@@ -69,6 +110,7 @@ export interface CollectionListItem {
   dimension: number;
   num_points: number;
   created_at: number;
+  distance: DistanceMetric;
 }
 
 export const CollectionListItemSchema = z.object({
@@ -76,6 +118,7 @@ export const CollectionListItemSchema = z.object({
   dimension: z.number().int(),
   num_points: z.number().int(),
   created_at: z.number(),
+  distance: DistanceMetricSchema,
 });
 
 // ─── Upsert Result ──────────────────────────────────────────────────────────
@@ -144,11 +187,13 @@ export const ListCollectionsResponseSchema = z.object({
 export interface SearchPointsResponse {
   results: SearchResult[];
   took_ms: number;
+  query_id?: string;
 }
 
 export const SearchPointsResponseSchema = z.object({
   results: z.array(SearchResultSchema),
   took_ms: z.number().int(),
+  query_id: z.string().optional(),
 });
 
 // ─── API Keys ───────────────────────────────────────────────────────────────
@@ -347,6 +392,153 @@ export const ExplainSearchQuerySchema = z.object({
   vector: z.array(z.number()).min(1),
   limit: z.number().int().min(1),
   filter: z.record(z.unknown()).optional(),
+});
+
+// ─── Collection Detail (GET /collections/{name}) ────────────────────────────
+
+export interface CollectionStats {
+  index_size_bytes: number;
+}
+
+export const CollectionStatsSchema = z.object({
+  index_size_bytes: z.number().int(),
+});
+
+export interface CollectionDetail {
+  name: string;
+  dimension: number;
+  num_points: number;
+  last_updated: number;
+  distance: DistanceMetric;
+  stats: CollectionStats;
+}
+
+export const CollectionDetailSchema = z.object({
+  name: z.string(),
+  dimension: z.number().int(),
+  num_points: z.number().int(),
+  last_updated: z.number(),
+  distance: DistanceMetricSchema,
+  stats: CollectionStatsSchema,
+});
+
+// ─── Point Detail (GET /collections/{name}/points/{id}) ─────────────────────
+
+export interface PointDetail {
+  id: string;
+  vector: number[];
+  metadata: Record<string, unknown>;
+  created_at: number;
+}
+
+export const PointDetailSchema = z.object({
+  id: z.string(),
+  vector: z.array(z.number()),
+  metadata: z.record(z.unknown()).default({}),
+  created_at: z.number(),
+});
+
+// ─── List Points (GET /collections/{name}/points) ───────────────────────────
+
+export interface ListPointsResult {
+  points: PointDetail[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+}
+
+export const ListPointsResultSchema = z.object({
+  points: z.array(PointDetailSchema),
+  total: z.number().int(),
+  limit: z.number().int(),
+  offset: z.number().int(),
+  has_more: z.boolean(),
+});
+
+// ─── Delete Points Result ───────────────────────────────────────────────────
+
+export interface DeletePointsResult {
+  deleted: number;
+}
+
+export const DeletePointsResultSchema = z.object({
+  deleted: z.number().int(),
+});
+
+// ─── Hybrid Search Query ────────────────────────────────────────────────────
+
+export interface HybridSearchQuery {
+  /** Text query for BM25 keyword matching. */
+  query_text: string;
+  /** Query vector for similarity search. */
+  query_vector: number[];
+  /** Maximum number of results. */
+  limit: number;
+  /** Weight for vector search score (0-1). BM25 weight = 1 - alpha. Default: 0.5. */
+  alpha?: number;
+}
+
+export const HybridSearchQuerySchema = z.object({
+  query_text: z.string().min(1),
+  query_vector: z.array(z.number()).min(1),
+  limit: z.number().int().min(1),
+  alpha: z.number().min(0).max(1).optional(),
+});
+
+// ─── WebSocket Messages ─────────────────────────────────────────────────────
+
+export interface WsAckMessage {
+  upserted: number;
+  failed: number;
+  took_ms: number;
+}
+
+export const WsAckMessageSchema = z.object({
+  type: z.literal("ack"),
+  upserted: z.number().int(),
+  failed: z.number().int(),
+  took_ms: z.number(),
+});
+
+export interface WsEventMessage {
+  collection: string;
+  action: string;
+  point_ids: string[];
+  timestamp: number;
+}
+
+export const WsEventMessageSchema = z.object({
+  type: z.literal("event"),
+  collection: z.string(),
+  action: z.string(),
+  point_ids: z.array(z.string()),
+  timestamp: z.number(),
+});
+
+export interface WsErrorMessage {
+  message: string;
+  code: number;
+}
+
+export const WsErrorMessageSchema = z.object({
+  type: z.literal("error"),
+  message: z.string(),
+  code: z.number().int(),
+});
+
+// ─── Realtime Client Options ────────────────────────────────────────────────
+
+export interface RealtimeClientOptions {
+  /** Base URL of the FerresDB server (e.g., "http://localhost:8080"). */
+  baseUrl: string;
+  /** API key for authentication (passed as ?token= query param). */
+  apiKey?: string;
+}
+
+export const RealtimeClientOptionsSchema = z.object({
+  baseUrl: z.string().url(),
+  apiKey: z.string().min(1).optional(),
 });
 
 // ─── Client Options ─────────────────────────────────────────────────────────
