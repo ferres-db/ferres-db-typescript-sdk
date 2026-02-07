@@ -10,5 +10,5 @@ export default defineConfig({
   treeshake: true,
   minify: false,
   outDir: "dist",
-  external: ["axios", "zod"],
+  external: ["axios", "ws", "zod"],
 });

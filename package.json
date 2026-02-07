@@ -1,6 +1,6 @@
 {
   "name": "@ferresdb/typescript-sdk",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "TypeScript SDK for FerresDB vector database",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -31,9 +31,11 @@
   },
   "dependencies": {
     "axios": "^1.7.9",
+    "ws": "^8.18.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@types/ws": "^8.5.13",
     "@types/node": "^22.10.0",
     "@typescript-eslint/eslint-plugin": "^8.54.0",
     "@typescript-eslint/parser": "^8.54.0",

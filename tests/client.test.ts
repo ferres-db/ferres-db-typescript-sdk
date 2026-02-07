@@ -6,7 +6,9 @@ import {
   DistanceMetric,
   EstimateSearchQuery,
   ExplainSearchQuery,
+  HybridSearchQuery,
   Point,
+  ScalarType,
   SearchQuery,
 } from "../src/types";
 import {
@@ -123,8 +125,7 @@ describe("VectorDBClient", () => {
   });
 
   describe("listCollections", () => {
-    it("should list collections successfully", async () => {
-      // Client's request() returns unwrapped response body
+    it("should list collections successfully with distance", async () => {
       const mockResponse = {
         collections: [
           {
@@ -132,12 +133,14 @@ describe("VectorDBClient", () => {
             dimension: 384,
             num_points: 100,
             created_at: 1234567890,
+            distance: "Cosine",
           },
           {
             name: "collection2",
             dimension: 768,
             num_points: 200,
             created_at: 1234567891,
+            distance: "Euclidean",
           },
         ],
       };
@@ -149,7 +152,9 @@ describe("VectorDBClient", () => {
 
       expect(result).toHaveLength(2);
       expect(result[0].name).toBe("collection1");
+      expect(result[0].distance).toBe(DistanceMetric.Cosine);
       expect(result[1].name).toBe("collection2");
+      expect(result[1].distance).toBe(DistanceMetric.Euclidean);
     });
   });
 
@@ -204,12 +209,16 @@ describe("VectorDBClient", () => {
   });
 
   describe("deletePoints", () => {
-    it("should delete points successfully", async () => {
-      const mockRequest = vi.fn().mockResolvedValue(undefined);
+    it("should delete points and return count", async () => {
+      const mockRequest = vi.fn().mockResolvedValue({ deleted: 2 });
       (client as any).request = mockRequest;
 
-      await client.deletePoints("test-collection", ["id1", "id2"]);
+      const result = await client.deletePoints("test-collection", [
+        "id1",
+        "id2",
+      ]);
 
+      expect(result.deleted).toBe(2);
       expect(mockRequest).toHaveBeenCalledWith(
         "DELETE",
         "/api/v1/collections/test-collection/points",
@@ -225,13 +234,12 @@ describe("VectorDBClient", () => {
   });
 
   describe("search", () => {
-    it("should search successfully", async () => {
+    it("should search and return full response with query_id", async () => {
       const query: SearchQuery = {
         vector: [0.1, 0.2, 0.3],
         limit: 10,
       };
 
-      // Client's request() returns unwrapped response body
       const mockResponse = {
         results: [
           {
@@ -241,6 +249,7 @@ describe("VectorDBClient", () => {
           },
         ],
         took_ms: 5,
+        query_id: "qid-123",
       };
 
       const mockRequest = vi.fn().mockResolvedValue(mockResponse);
@@ -248,9 +257,11 @@ describe("VectorDBClient", () => {
 
       const result = await client.search("test-collection", query);
 
-      expect(result).toHaveLength(1);
-      expect(result[0].id).toBe("point-1");
-      expect(result[0].score).toBe(0.95);
+      expect(result.results).toHaveLength(1);
+      expect(result.results[0].id).toBe("point-1");
+      expect(result.results[0].score).toBe(0.95);
+      expect(result.took_ms).toBe(5);
+      expect(result.query_id).toBe("qid-123");
     });
 
     it("should include filter in search query", async () => {
@@ -386,7 +397,7 @@ describe("VectorDBClient", () => {
 
       const result = await client.search("test-collection", query);
 
-      expect(result).toHaveLength(1);
+      expect(result.results).toHaveLength(1);
       expect(mockRequest).toHaveBeenCalledWith(
         "POST",
         "/api/v1/collections/test-collection/search",
@@ -625,6 +636,219 @@ describe("VectorDBClient", () => {
           filter: { category: "tech", price: { $gte: 10 } },
         },
       );
+    });
+  });
+
+  // ─── Create Collection with Quantization ─────────────────────────────
+
+  describe("createCollection with quantization", () => {
+    it("should send quantization config when provided", async () => {
+      const config: CollectionConfig = {
+        name: "quantized",
+        dimension: 384,
+        distance: DistanceMetric.Cosine,
+        quantization: {
+          Scalar: {
+            dtype: ScalarType.Int8,
+            always_ram: true,
+            quantile: 95.0,
+          },
+        },
+      };
+      const mockResponse = {
+        name: "quantized",
+        dimension: 384,
+        distance: DistanceMetric.Cosine,
+        created_at: 1234567890,
+      };
+      const mockRequest = vi.fn().mockResolvedValue(mockResponse);
+      (client as any).request = mockRequest;
+
+      await client.createCollection(config);
+
+      expect(mockRequest).toHaveBeenCalledWith("POST", "/api/v1/collections", {
+        name: "quantized",
+        dimension: 384,
+        distance: DistanceMetric.Cosine,
+        quantization: {
+          Scalar: { dtype: "Int8", always_ram: true, quantile: 95.0 },
+        },
+      });
+    });
+
+    it("should not send quantization when omitted", async () => {
+      const config: CollectionConfig = {
+        name: "plain",
+        dimension: 128,
+        distance: DistanceMetric.Euclidean,
+      };
+      const mockResponse = {
+        name: "plain",
+        dimension: 128,
+        distance: DistanceMetric.Euclidean,
+        created_at: 1234567890,
+      };
+      const mockRequest = vi.fn().mockResolvedValue(mockResponse);
+      (client as any).request = mockRequest;
+
+      await client.createCollection(config);
+
+      const callBody = mockRequest.mock.calls[0][2];
+      expect(callBody).not.toHaveProperty("quantization");
+    });
+  });
+
+  // ─── Get Collection ──────────────────────────────────────────────────
+
+  describe("getCollection", () => {
+    it("should get collection details", async () => {
+      const mockResponse = {
+        name: "my-col",
+        dimension: 128,
+        num_points: 5000,
+        last_updated: 1700000000,
+        distance: "Cosine",
+        stats: { index_size_bytes: 1048576 },
+      };
+      const mockRequest = vi.fn().mockResolvedValue(mockResponse);
+      (client as any).request = mockRequest;
+
+      const result = await client.getCollection("my-col");
+
+      expect(result.name).toBe("my-col");
+      expect(result.num_points).toBe(5000);
+      expect(result.distance).toBe(DistanceMetric.Cosine);
+      expect(result.stats.index_size_bytes).toBe(1048576);
+      expect(mockRequest).toHaveBeenCalledWith(
+        "GET",
+        "/api/v1/collections/my-col",
+      );
+    });
+  });
+
+  // ─── Get Point ───────────────────────────────────────────────────────
+
+  describe("getPoint", () => {
+    it("should get a single point by ID", async () => {
+      const mockResponse = {
+        id: "doc-42",
+        vector: [0.1, 0.2, 0.3],
+        metadata: { text: "hello" },
+        created_at: 1700000000,
+      };
+      const mockRequest = vi.fn().mockResolvedValue(mockResponse);
+      (client as any).request = mockRequest;
+
+      const result = await client.getPoint("my-col", "doc-42");
+
+      expect(result.id).toBe("doc-42");
+      expect(result.vector).toEqual([0.1, 0.2, 0.3]);
+      expect(result.created_at).toBe(1700000000);
+      expect(mockRequest).toHaveBeenCalledWith(
+        "GET",
+        "/api/v1/collections/my-col/points/doc-42",
+      );
+    });
+  });
+
+  // ─── List Points ─────────────────────────────────────────────────────
+
+  describe("listPoints", () => {
+    it("should list points with pagination", async () => {
+      const mockResponse = {
+        points: [
+          { id: "p1", vector: [0.1], metadata: {}, created_at: 1000 },
+          { id: "p2", vector: [0.2], metadata: {}, created_at: 2000 },
+        ],
+        total: 50,
+        limit: 2,
+        offset: 0,
+        has_more: true,
+      };
+      const mockRequest = vi.fn().mockResolvedValue(mockResponse);
+      (client as any).request = mockRequest;
+
+      const result = await client.listPoints("my-col", {
+        limit: 2,
+        offset: 0,
+      });
+
+      expect(result.points).toHaveLength(2);
+      expect(result.total).toBe(50);
+      expect(result.has_more).toBe(true);
+
+      const calledPath = mockRequest.mock.calls[0][1];
+      expect(calledPath).toContain("limit=2");
+      expect(calledPath).toContain("offset=0");
+    });
+
+    it("should call without query params when no options", async () => {
+      const mockResponse = {
+        points: [],
+        total: 0,
+        limit: 100,
+        offset: 0,
+        has_more: false,
+      };
+      const mockRequest = vi.fn().mockResolvedValue(mockResponse);
+      (client as any).request = mockRequest;
+
+      await client.listPoints("my-col");
+
+      const calledPath = mockRequest.mock.calls[0][1];
+      expect(calledPath).toBe("/api/v1/collections/my-col/points");
+    });
+  });
+
+  // ─── Hybrid Search ───────────────────────────────────────────────────
+
+  describe("hybridSearch", () => {
+    it("should send hybrid search request", async () => {
+      const query: HybridSearchQuery = {
+        query_text: "hello world",
+        query_vector: [0.1, 0.2, 0.3],
+        limit: 5,
+        alpha: 0.7,
+      };
+      const mockResponse = {
+        results: [{ id: "doc-1", score: 0.92, metadata: { text: "hello" } }],
+        took_ms: 8,
+        query_id: "q-abc",
+      };
+      const mockRequest = vi.fn().mockResolvedValue(mockResponse);
+      (client as any).request = mockRequest;
+
+      const result = await client.hybridSearch("docs", query);
+
+      expect(result.results).toHaveLength(1);
+      expect(result.took_ms).toBe(8);
+      expect(result.query_id).toBe("q-abc");
+      expect(mockRequest).toHaveBeenCalledWith(
+        "POST",
+        "/api/v1/collections/docs/search/hybrid",
+        {
+          query_text: "hello world",
+          query_vector: [0.1, 0.2, 0.3],
+          limit: 5,
+          alpha: 0.7,
+        },
+      );
+    });
+
+    it("should omit alpha when not provided", async () => {
+      const query: HybridSearchQuery = {
+        query_text: "test",
+        query_vector: [0.1],
+        limit: 10,
+      };
+      const mockResponse = { results: [], took_ms: 1 };
+      const mockRequest = vi.fn().mockResolvedValue(mockResponse);
+      (client as any).request = mockRequest;
+
+      await client.hybridSearch("docs", query);
+
+      const callBody = mockRequest.mock.calls[0][2];
+      expect(callBody).not.toHaveProperty("alpha");
     });
   });
 });

@@ -5,11 +5,11 @@ SDK TypeScript oficial para o FerresDB - banco de dados vetorial de alta perform
 ## 📦 Instalação
 
 ```bash
-pnpm add @ferres-db/typescript-sdk
+pnpm add @ferresdb/typescript-sdk
 # ou
-npm install @ferres-db/typescript-sdk
+npm install @ferresdb/typescript-sdk
 # ou
-yarn add @ferres-db/typescript-sdk
+yarn add @ferresdb/typescript-sdk
 ```
 
 ## 🐳 Executando FerresDB com Docker
