@@ -387,6 +387,7 @@ export interface ExplainResult {
   score: number;
   distance_metric: string;
   raw_distance: number;
+  similarity?: number | null;
   score_breakdown: Record<string, number>;
   filter_evaluation?: FilterExplanation | null;
   rank_before_filter: number;
@@ -398,6 +399,7 @@ export const ExplainResultSchema = z.object({
   score: z.number(),
   distance_metric: z.string(),
   raw_distance: z.number(),
+  similarity: z.number().optional().nullable(),
   score_breakdown: z.record(z.number()),
   filter_evaluation: FilterExplanationSchema.optional().nullable(),
   rank_before_filter: z.number().int(),
