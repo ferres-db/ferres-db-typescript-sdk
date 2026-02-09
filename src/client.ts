@@ -327,11 +327,17 @@ export class VectorDBClient {
       "POST",
       `/api/v1/collections/${collection}/points`,
       {
-        points: points.map((p) => ({
-          id: p.id,
-          vector: p.vector,
-          metadata: p.metadata,
-        })),
+        points: points.map((p) => {
+          const payload: Record<string, unknown> = {
+            id: p.id,
+            vector: p.vector,
+            metadata: p.metadata,
+          };
+          if (p.namespace !== undefined) payload.namespace = p.namespace;
+          if (p.ttl !== undefined) payload.ttl = p.ttl;
+          if (p.vectors !== undefined) payload.vectors = p.vectors;
+          return payload;
+        }),
       },
     );
 
@@ -343,20 +349,25 @@ export class VectorDBClient {
    *
    * @param collection - Collection name
    * @param ids - List of point IDs to delete
+   * @param namespace - When given, only points in this namespace are deleted for the provided ids
    * @returns The number of points actually deleted
    */
   async deletePoints(
     collection: string,
     ids: string[],
+    namespace?: string,
   ): Promise<DeletePointsResult> {
     if (ids.length === 0) {
       throw new InvalidPayloadError("ids cannot be empty");
     }
 
+    const body: Record<string, unknown> = { ids };
+    if (namespace !== undefined) body.namespace = namespace;
+
     const response = await this.request<DeletePointsResult>(
       "DELETE",
       `/api/v1/collections/${collection}/points`,
-      { ids },
+      body,
     );
 
     return DeletePointsResultSchema.parse(response);
@@ -379,6 +390,10 @@ export class VectorDBClient {
       limit: query.limit,
       ...(query.filter && { filter: query.filter }),
       ...(query.budget_ms !== undefined && { budget_ms: query.budget_ms }),
+      ...(query.namespace !== undefined && { namespace: query.namespace }),
+      ...(query.vector_field !== undefined && {
+        vector_field: query.vector_field,
+      }),
     };
 
     const response = await this.request<SearchPointsResponse>(
@@ -474,6 +489,7 @@ export class VectorDBClient {
       ...(query.include_history !== undefined && {
         include_history: query.include_history,
       }),
+      ...(query.namespace !== undefined && { namespace: query.namespace }),
     };
 
     const response = await this.request<EstimateSearchResponse>(
@@ -541,6 +557,7 @@ export class VectorDBClient {
       ...(query.alpha !== undefined && { alpha: query.alpha }),
       ...(query.fusion !== undefined && { fusion: query.fusion }),
       ...(query.rrf_k !== undefined && { rrf_k: query.rrf_k }),
+      ...(query.namespace !== undefined && { namespace: query.namespace }),
     };
 
     const response = await this.request<SearchPointsResponse>(
@@ -561,11 +578,16 @@ export class VectorDBClient {
    * @param pointId - Unique point ID
    * @returns Point details with id, vector, metadata, and created_at
    */
-  async getPoint(collection: string, pointId: string): Promise<PointDetail> {
-    const response = await this.request<PointDetail>(
-      "GET",
-      `/api/v1/collections/${collection}/points/${pointId}`,
-    );
+  async getPoint(
+    collection: string,
+    pointId: string,
+    namespace?: string,
+  ): Promise<PointDetail> {
+    let url = `/api/v1/collections/${collection}/points/${pointId}`;
+    if (namespace !== undefined) {
+      url += `?namespace=${encodeURIComponent(namespace)}`;
+    }
+    const response = await this.request<PointDetail>("GET", url);
 
     return PointDetailSchema.parse(response);
   }
@@ -666,7 +688,11 @@ export interface IVectorDBClient {
   getCollection(name: string): Promise<CollectionDetail>;
   deleteCollection(name: string): Promise<void>;
   upsertPoints(collection: string, points: Point[]): Promise<UpsertResult>;
-  deletePoints(collection: string, ids: string[]): Promise<DeletePointsResult>;
+  deletePoints(
+    collection: string,
+    ids: string[],
+    namespace?: string,
+  ): Promise<DeletePointsResult>;
   search(collection: string, query: SearchQuery): Promise<SearchPointsResponse>;
   hybridSearch(
     collection: string,
@@ -681,7 +707,11 @@ export interface IVectorDBClient {
     query: ExplainSearchQuery,
   ): Promise<SearchExplanation>;
   getTierDistribution(name: string): Promise<TierDistribution>;
-  getPoint(collection: string, pointId: string): Promise<PointDetail>;
+  getPoint(
+    collection: string,
+    pointId: string,
+    namespace?: string,
+  ): Promise<PointDetail>;
   listPoints(
     collection: string,
     options?: {

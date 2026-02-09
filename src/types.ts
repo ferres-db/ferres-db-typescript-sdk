@@ -16,12 +16,21 @@ export interface Point {
   id: string;
   vector: number[];
   metadata: Record<string, unknown>;
+  /** Logical namespace (multitenancy). When set, point is scoped to this namespace. */
+  namespace?: string;
+  /** TTL in seconds; point expires and is removed by vacuum worker after this time. */
+  ttl?: number;
+  /** Named additional vectors (e.g. title_vector, content_vector). Each must match collection dimension. */
+  vectors?: Record<string, number[]>;
 }
 
 export const PointSchema = z.object({
   id: z.string().min(1),
   vector: z.array(z.number()).min(1),
   metadata: z.record(z.unknown()).default({}),
+  namespace: z.string().optional(),
+  ttl: z.number().int().positive().optional(),
+  vectors: z.record(z.string(), z.array(z.number())).optional(),
 });
 
 // ─── Scalar Quantization (SQ8) ───────────────────────────────────────────
@@ -205,6 +214,10 @@ export interface SearchQuery {
   filter?: Record<string, unknown>;
   /** Max latency budget in ms. If estimated cost exceeds this, server returns 422. */
   budget_ms?: number;
+  /** Restrict results to this logical namespace (multitenancy). */
+  namespace?: string;
+  /** Named vector field to search against (e.g. "title_vector", "content_vector"). Omit or "default" for main vector. */
+  vector_field?: string;
 }
 
 export const SearchQuerySchema = z.object({
@@ -212,6 +225,8 @@ export const SearchQuerySchema = z.object({
   limit: z.number().int().min(1),
   filter: z.record(z.unknown()).optional(),
   budget_ms: z.number().int().positive().optional(),
+  namespace: z.string().optional(),
+  vector_field: z.string().optional(),
 });
 
 // ─── Search Result ──────────────────────────────────────────────────────────
@@ -220,12 +235,15 @@ export interface SearchResult {
   id: string;
   score: number;
   metadata: Record<string, unknown>;
+  /** Present when the point was stored with a namespace. */
+  namespace?: string;
 }
 
 export const SearchResultSchema = z.object({
   id: z.string(),
   score: z.number(),
   metadata: z.record(z.unknown()),
+  namespace: z.string().optional(),
 });
 
 // ─── API Response Types ─────────────────────────────────────────────────────
@@ -346,12 +364,15 @@ export interface EstimateSearchQuery {
   limit: number;
   filter?: Record<string, unknown>;
   include_history?: boolean;
+  /** Restrict estimate to scenario filtered by this namespace. */
+  namespace?: string;
 }
 
 export const EstimateSearchQuerySchema = z.object({
   limit: z.number().int().min(1),
   filter: z.record(z.unknown()).optional(),
   include_history: z.boolean().optional(),
+  namespace: z.string().optional(),
 });
 
 // ─── Explain Query ──────────────────────────────────────────────────────
@@ -485,6 +506,10 @@ export interface PointDetail {
   vector: number[];
   metadata: Record<string, unknown>;
   created_at: number;
+  /** Present when the point was stored with a namespace. */
+  namespace?: string;
+  /** Named vectors (e.g. title_vector, content_vector) when present. */
+  vectors?: Record<string, number[]>;
 }
 
 export const PointDetailSchema = z.object({
@@ -492,6 +517,8 @@ export const PointDetailSchema = z.object({
   vector: z.array(z.number()),
   metadata: z.record(z.unknown()).default({}),
   created_at: z.number(),
+  namespace: z.string().optional(),
+  vectors: z.record(z.string(), z.array(z.number())).optional(),
 });
 
 // ─── List Points (GET /collections/{name}/points) ───────────────────────────
@@ -537,6 +564,8 @@ export interface HybridSearchQuery {
   fusion?: "weighted" | "rrf";
   /** RRF constant k (default: 60). Only used when fusion is "rrf". Higher values smooth rank differences. */
   rrf_k?: number;
+  /** Restrict results to this logical namespace (multitenancy). */
+  namespace?: string;
 }
 
 export const HybridSearchQuerySchema = z.object({
@@ -546,6 +575,7 @@ export const HybridSearchQuerySchema = z.object({
   alpha: z.number().min(0).max(1).optional(),
   fusion: z.enum(["weighted", "rrf"]).optional(),
   rrf_k: z.number().int().min(1).optional(),
+  namespace: z.string().optional(),
 });
 
 // ─── Reindex ─────────────────────────────────────────────────────────────────
